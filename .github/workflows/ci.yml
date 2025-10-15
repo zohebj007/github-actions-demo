@@ -1,6 +1,5 @@
-name: Python sDAR pipeline
+name: Python CI + Docker Build and Push
 
-# Trigger: when code is pushed or PR is opened
 on:
   push:
     branches: [ main ]
@@ -8,24 +7,61 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest   # GitHub-hosted runner
+  build-test-and-push:
+    runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the code
-      - name: Checkout repo
+      # Step 1: Checkout the repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       # Step 2: Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
-      # Step 3: Install dependencies
+      # Step 3: Install pytest
       - name: Install pytest
         run: pip install pytest
 
       # Step 4: Run tests
       - name: Run tests
         run: pytest -v
+
+      # Step 5: Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Step 6: Set variables for tag
+      - name: Set image tag variables
+        id: vars
+        run: |
+          REPO_NAME=${GITHUB_REPOSITORY##*/}    # Extracts only repo name (without org)
+          COMMIT_ID=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          IMAGE_TAG="${REPO_NAME}-dev-${COMMIT_ID}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "FULL_IMAGE=${{ secrets.DOCKER_USERNAME }}/githubactions:${IMAGE_TAG}" >> $GITHUB_ENV
+
+      # Step 7: Build Docker image
+      - name: Build Docker image
+        run: |
+          echo "Building image: $FULL_IMAGE"
+          docker build -t $FULL_IMAGE .
+
+      # Step 8: Push Docker image
+      - name: Push Docker image
+        if: success()   # only if build succeeded
+        run: |
+          echo "Pushing image: $FULL_IMAGE"
+          docker push $FULL_IMAGE
+
+      # Optional: Display final tag
+      - name: Print image info
+        run: |
+          echo ""
+          echo "✅ Docker image successfully built and pushed!"
+          echo "🔹 Image: $FULL_IMAGE"
