@@ -21,9 +21,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      # Step 3: Install pytest
-      - name: Install pytest
-        run: pip install pytest
+      # Step 3: Install dependencies and pytest
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
 
       # Step 4: Run tests
       - name: Run tests
@@ -31,6 +33,7 @@ jobs:
 
       # Step 5: Login to Docker Hub
       - name: Login to Docker Hub
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -44,7 +47,7 @@ jobs:
           COMMIT_ID=$(echo "${GITHUB_SHA}" | cut -c1-7)
           IMAGE_TAG="${REPO_NAME}-dev-${COMMIT_ID}"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "FULL_IMAGE=${{ secrets.DOCKER_USERNAME }}/githubactions:${IMAGE_TAG}" >> $GITHUB_ENV
+          echo "FULL_IMAGE=${{ secrets.DOCKER_USERNAME }}/$REPO_NAME:${IMAGE_TAG}" >> $GITHUB_ENV
 
       # Step 7: Build Docker image
       - name: Build Docker image
@@ -54,14 +57,52 @@ jobs:
 
       # Step 8: Push Docker image
       - name: Push Docker image
-        if: success()   # only if build succeeded
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo "Pushing image: $FULL_IMAGE"
           docker push $FULL_IMAGE
 
       # Optional: Display final tag
       - name: Print image info
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo ""
           echo "✅ Docker image successfully built and pushed!"
           echo "🔹 Image: $FULL_IMAGE"
+
+  approve-for-deploy:
+    runs-on: ubuntu-latest
+    needs: build-test-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://your-prod-env.example.com
+    
+    steps:
+      # Step 1: Wait for manual approval
+      - name: Wait for manual approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.token }}
+          approvers: ${{ vars.APPROVERS || '[]' }}
+          minimum-approvals: 1
+          issue-title: "Deployment Approval Required"
+          issue-body: |
+            Please review and approve this deployment to production.
+            
+            **Commit:** ${{ github.sha }}
+            **Triggered by:** ${{ github.actor }}
+            
+            Approve this deployment by commenting with: `/approve`
+            
+            Reject this deployment by commenting with: `/reject`
+
+      # Step 2: Deployment steps after approval
+      - name: Deploy to production
+        if: success()
+        run: |
+          echo "✅ Approved for production deployment!"
+          echo "🚀 Starting deployment process..."
+          # Add your deployment commands here
+          # Example: kubectl apply -f k8s/
+          # Example: docker stack deploy -c docker-compose.prod.yml myapp
