@@ -1,0 +1,97 @@
+name: Full Production CI/CD
+
+on:
+  push:
+    branches: [ prod ]
+
+env:
+  DOCKER_REPO: zoheb/githubactions
+  TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+jobs:
+  # ---------- CI STAGE ----------
+  build-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests..."
+          npm test || { echo "❌ Tests failed. Exiting pipeline."; exit 1; }
+
+      - name: Generate Docker image tag
+        id: tag
+        run: |
+          REPO=$(basename $GITHUB_REPOSITORY)
+          BRANCH=${GITHUB_REF##*/}
+          COMMIT_ID=$(echo $GITHUB_SHA | cut -c1-7)
+          TAG="${REPO}-${BRANCH}-${COMMIT_ID}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "✅ Image Tag: $TAG"
+
+      - name: Build Docker image
+        run: |
+          echo "🏗️ Building Docker image..."
+          docker build -t $DOCKER_REPO:${{ steps.tag.outputs.tag }} .
+          if [ $? -ne 0 ]; then
+            echo "❌ Docker build failed! Exiting."
+            exit 1
+          fi
+
+      - name: Push Docker image
+        run: |
+          echo "📦 Pushing Docker image..."
+          echo ${{ secrets.DOCKERHUB_TOKEN }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+          docker push $DOCKER_REPO:${{ steps.tag.outputs.tag }}
+          echo "✅ Image pushed successfully"
+
+  # ---------- MANUAL APPROVAL STAGE ----------
+  approve-for-deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    environment:
+      name: production
+      url: https://your-prod-env.example.com
+    steps:
+      - name: Await manual approval
+        run: |
+          echo "🟡 Waiting for approval to deploy..."
+          echo "✅ Approved for production deployment!"
+
+  # ---------- CD STAGE ----------
+  deploy:
+    runs-on: ubuntu-latest
+    needs: approve-for-deploy
+    if: ${{ needs.build-and-test.result == 'success' }}
+    steps:
+      - name: Deploy to Production
+        run: |
+          echo "🚀 Starting deployment..."
+          # Simulate multiple environment deployments with a for loop
+          for ENV in "frontend" "backend" "database"; do
+            echo "🔧 Deploying $ENV service..."
+            sleep 2
+            echo "$ENV deployed successfully!"
+          done
+
+          echo "✅ Deployment completed successfully!"
+
+      - name: Notify Teams
+        if: success()
+        run: |
+          MESSAGE="🚀 Deployment Successful! \nApp: ${{ github.repository }} \nEnvironment: Production \nCommit: ${{ github.sha }}"
+          PAYLOAD="{\"text\": \"$MESSAGE\"}"
+          curl -H "Content-Type: application/json" -d "$PAYLOAD" $TEAMS_WEBHOOK
+          echo "📢 Teams notified!"
