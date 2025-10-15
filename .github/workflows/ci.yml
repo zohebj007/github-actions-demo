@@ -1,0 +1,31 @@
+name: Python sDAR pipeline
+
+# Trigger: when code is pushed or PR is opened
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest   # GitHub-hosted runner
+
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Step 3: Install dependencies
+      - name: Install pytest
+        run: pip install pytest
+
+      # Step 4: Run tests
+      - name: Run tests
+        run: pytest -v
